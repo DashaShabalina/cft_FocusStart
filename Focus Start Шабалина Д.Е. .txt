@@ -1,0 +1,241 @@
+Шабалина Д.Е
+Использовала  web-интерфейс официального Oracle-сервера: https://apex.oracle.com/en/
+#######################################
+ЗАПРОС 3
+--Сформируйте отчет за предыдущий календарный месяц 
+--относительно даты формирования отчета: коды и наименования 
+--товаров, которые отсутствовали в отчетный период во всех покупках клиентов.
+
+SELECT CODE, NAME FROM PRODUCTS
+WHERE ID NOT IN 
+(SELECT PRODUCTS.ID FROM PURCHASES JOIN PURCHASES_RECEIPTS ON  PURCHASES.ID=PURCHASES_RECEIPTS.PURCHASES_ID
+JOIN PRODUCTS ON PURCHASES_RECEIPTS.PRODUCT_ID=PRODUCTS.ID
+WHERE  datetime BETWEEN trunc(ADD_MONTHS(SYSDATE, -1), 'MM')  AND trunc (SYSDATE, 'MM'))
+#######################################
+ЗАПРОС 4
+--Сформируйте отчет за предыдущий календарный месяц относительно даты
+--формирования отчета: в разрезе магазинов вывести имена и фамилии продавцов, которые
+--не совершили в отчетный период ни одной продажи. Продавец – это сотрудник, у
+--которого в должности содержится подстрока ПРОДАВЕЦ без учета регистра.
+
+SELECT NAME,FIRST_NAME, LAST_NAME FROM EMPLOYEES JOIN SHOPS ON
+EMPLOYEES.SHOP_ID=SHOPS.ID
+WHERE EMPLOYEES.ID NOT IN 
+(SELECT EMPLOYEES.ID FROM EMPLOYEES JOIN PURCHASES ON EMPLOYEES.ID=PURCHASES.SELLER_ID 
+WHERE lower(JOB_NAME) LIKE '%продавец%' and datetime BETWEEN trunc(ADD_MONTHS(SYSDATE, -1), 'MM')  AND trunc (SYSDATE, 'MM'))
+#######################################
+ЗАПРОС 5
+--Сформируйте отчет за предыдущий календарный месяц относительно даты
+--формирования отчета: в разрезе магазинов вывести имена и фамилии самых эффективных
+--в отчетный период продавцов (по полученной выручке). Продавец – это сотрудник, у
+--которого в должности содержится подстрока ПРОДАВЕЦ без учета регистра.
+
+SELECT LAST_NAME,FIRST_NAME,sum,NAME FROM
+(SELECT LAST_NAME,FIRST_NAME,sum,NAME,MAX(sum) OVER ( PARTITION BY SHOP_ID  ) AS MAX_SUM FROM(
+SELECT EMPLOYEES.ID,LAST_NAME,FIRST_NAME,SHOP_ID,NAME, SUM(AMOUNT) as sum  FROM EMPLOYEES JOIN PURCHASES ON EMPLOYEES.ID=PURCHASES.SELLER_ID 
+JOIN SHOPS ON EMPLOYEES.SHOP_ID=SHOPS.ID
+WHERE lower(JOB_NAME) LIKE '%продавец%' and datetime BETWEEN trunc(ADD_MONTHS(SYSDATE, -1), 'MM')  AND trunc (SYSDATE, 'MM')
+GROUP BY EMPLOYEES.ID,LAST_NAME,FIRST_NAME,SHOP_ID,NAME))
+WHERE sum=MAX_SUM
+#######################################
+ЗАПРОС 6
+--Сформируйте отчет за предыдущий календарный месяц относительно даты
+--формирования отчета: выручка в отчетный период в разрезе регионов. Упорядочите
+--результат по убыванию выручки.
+
+SELECT REGION, SUM(AMOUNT) as INCOME FROM EMPLOYEES JOIN PURCHASES ON EMPLOYEES.ID=PURCHASES.SELLER_ID 
+JOIN SHOPS ON EMPLOYEES.SHOP_ID=SHOPS.ID
+WHERE datetime BETWEEN trunc(ADD_MONTHS(SYSDATE, -1), 'MM')  AND trunc (SYSDATE, 'MM')
+GROUP BY REGION 
+ORDER BY INCOME DESC
+#######################################
+ЗАПРОС 7
+--Выяснилось, что в результате программного сбоя в части магазинов в некоторые дни
+--полная стоимость покупки не бьётся с её разбивкой по товарам. Известно, что данные в
+--самих чеках покупок остались корректные, то есть пострадали только некоторые данные
+--столбца PURCHASES.AMOUNT. Выведите такие магазины и дни, в которые в них случился
+--сбой, а также сумму расхождения между полной стоимостью покупки и суммой по чеку.
+
+SELECT SHOPS.NAME,DATETIME,ABS(AMOUNT-REAL_VALUE) as MISTAKE FROM PURCHASES JOIN
+(SELECT PURCHASES_ID,SUM(AMOUNT_FULL-AMOUNT_DISCOUNT) as REAL_VALUE FROM PURCHASES_RECEIPTS
+GROUP BY PURCHASES_ID ) t ON PURCHASES.ID=t.PURCHASES_ID
+JOIN EMPLOYEES ON EMPLOYEES.ID=PURCHASES.SELLER_ID
+JOIN SHOPS ON SHOPS.ID=EMPLOYEES.SHOP_ID
+WHERE AMOUNT-REAL_VALUE!=0
+#######################################
+СКРИПТЫ НА СОЗДАНИЕ ТАБЛИЦ 
+
+CREATE TABLE SHOPS(
+    ID NUMBER(20) NOT NULL PRIMARY KEY,
+    NAME VARCHAR2(200) NOT NULL,
+    REGION VARCHAR2(200),
+    CITY VARCHAR2(200),
+    ADDRESS VARCHAR2(200),
+    MANAGER_ID NUMBER(20) 
+)
+
+
+CREATE TABLE EMPLOYEES(
+    ID NUMBER(20) NOT NULL PRIMARY KEY,
+    FIRST_NAME VARCHAR2(100),
+    LAST_NAME VARCHAR2(100),
+    PHONE VARCHAR2(50),
+    E_MAIL VARCHAR2(50),
+    JOB_NAME VARCHAR2(50),
+    SHOP_ID NUMBER(20) REFERENCES SHOPS(ID) ON DELETE SET NULL
+)
+
+
+ALTER TABLE SHOPS
+     MODIFY (MANAGER_ID REFERENCES EMPLOYEES(ID) ON DELETE SET NULL)
+
+
+CREATE TABLE PURCHASES(
+    ID NUMBER(20) NOT NULL PRIMARY KEY,
+    DATETIME DATE,
+    AMOUNT NUMBER(20),
+    SELLER_ID NUMBER(20) REFERENCES EMPLOYEES(ID) ON DELETE SET NULL
+)
+
+
+CREATE TABLE PRODUCTS(
+    ID NUMBER(20) NOT NULL PRIMARY KEY,
+    CODE VARCHAR2(50) NOT NULL UNIQUE ,
+    NAME VARCHAR2(200) NOT NULL
+)
+
+
+CREATE TABLE PURCHASES_RECEIPTS(
+PURCHASES_ID NUMBER(20) NOT NULL REFERENCES PURCHASES(ID) ON DELETE CASCADE ,
+ORDINAL_NUMBER NUMBER(5) NOT NULL,
+PRODUCT_ID NUMBER(20) REFERENCES PRODUCTS(ID) ON DELETE SET NULL,
+QUANTITY NUMBER(25,5) CHECK (QUANTITY>0),
+AMOUNT_FULL NUMBER(20) CHECK (AMOUNT_FULL>0),
+AMOUNT_DISCOUNT NUMBER(20),
+PRIMARY KEY(PURCHASES_ID,ORDINAL_NUMBER)
+)
+#######################################
+СКРИПТЫ НА ЗАПОЛНЕНИЕ ТАБЛИЦ 
+
+INSERT INTO SHOPS VALUES (1,'Small Things','Алтайский край','Барнаул','Улица nnn,nn',null);
+INSERT INTO SHOPS VALUES (2,'Sock Market','Московская область','Москва','Улица nnn,nn',null);
+INSERT INTO SHOPS VALUES (3,'Chocolate Chicken','Владимирская область','Владимир','Улица nnn,nn',null);
+INSERT INTO SHOPS VALUES (4,'Beauty&Seoul','Алтайский край','Барнаул','Улица nnn,nn',null);
+INSERT INTO SHOPS VALUES (5,'Autobarn','Алтайский край','Заринск','Улица nnn,nn',null);
+
+
+
+INSERT INTO EMPLOYEES VALUES (1,'Абрамова','Анастасия','79234567080','nickname0@mail.ru','Продавец-консультант',5); 
+INSERT INTO EMPLOYEES VALUES (2,'Акимов','Владимир','79064567080',null,'Продавец-консультант',5); 
+INSERT INTO EMPLOYEES VALUES (3,'Алешин','Денис','79834567080','nickname@mail.ru','Продавец-консультант',5); 
+INSERT INTO EMPLOYEES VALUES (4,'Алешина','Мария','79834567081','nickname1@mail.ru','Директор',5); 
+INSERT INTO EMPLOYEES VALUES (5,'Ананьев','Андрей','79834567082','nickname2@mail.ru','Продавец-консультант',1); 
+INSERT INTO EMPLOYEES VALUES (6,'Андреева','София','79834567083','nickname3@mail.ru','Директор',1); 
+INSERT INTO EMPLOYEES VALUES (7,'Архипов','Александр','79834567480','nickname4@mail.ru','Продавец-консультант',1; 
+INSERT INTO EMPLOYEES VALUES (8,'Баранова','Алиса','79834567085','nickname5@mail.ru','Продавец-консультант',2); 
+INSERT INTO EMPLOYEES VALUES (9,'Белов' ,'Константин','79834567680',null,'Продавец-консультант',2); 
+INSERT INTO EMPLOYEES VALUES (10,'Беляева','Мария','79834567087','nickname6@mail.ru','Продавец-консультант',3); 
+INSERT INTO EMPLOYEES VALUES (11,'Васильев','Ярослав','79134567880',null,'Продавец-консультант',2); 
+INSERT INTO EMPLOYEES VALUES (12,'Васильев','Иван','79834567089',null,'Уборщик',1); 
+INSERT INTO EMPLOYEES VALUES (13,'Волкова','Евгения','79134167080','nickname7@mail.ru','Продавец-консультант',3); 
+INSERT INTO EMPLOYEES VALUES (14,'Воробьев','Лев','79834567280','nickname8@mail.ru','Уборщик',3); 
+INSERT INTO EMPLOYEES VALUES (15,'Гаврилов','Степан','79134367080','nickname9@mail.ru','Директор',2); 
+INSERT INTO EMPLOYEES VALUES (16,'Герасимов','Василий','79844567080','nickname10@mail.ru','Продавец-консультант',1); 
+INSERT INTO EMPLOYEES VALUES (17,'Герасимова','Татьяна','79534567080','nickname11@mail.ru','Продавец-консультант',4); 
+INSERT INTO EMPLOYEES VALUES (18,'Глухов','Вадим','79136567080','nickname12@mail.ru','Директор',4); 
+INSERT INTO EMPLOYEES VALUES (19,'Голубева','Евгения','79837567080','nickname13@mail.ru','Директор',3); 
+INSERT INTO EMPLOYEES VALUES (20,'Голубева','Яна','79134777080','nickname14@mail.ru','Продавец-консультант',3); 
+
+
+UPDATE SHOPS
+   SET  MANAGER_ID = 6
+ WHERE ID = 1;
+
+UPDATE SHOPS
+   SET  MANAGER_ID = 15
+ WHERE ID = 2;
+
+ UPDATE SHOPS
+   SET  MANAGER_ID = 19
+ WHERE ID = 3;
+
+ UPDATE SHOPS
+   SET  MANAGER_ID = 18
+ WHERE ID = 4;
+
+ UPDATE SHOPS
+   SET  MANAGER_ID = 4
+ WHERE ID = 5;
+
+
+
+
+INSERT INTO PURCHASES VALUES (1,to_date('11.01.2021 17:50:00', 'dd.mm.yyyy hh24:mi:ss'),300,1);
+INSERT INTO PURCHASES VALUES (2,to_date('12.01.2021 17:50:00', 'dd.mm.yyyy hh24:mi:ss'),3000,2);
+INSERT INTO PURCHASES VALUES (3,to_date('13.02.2021 17:50:00', 'dd.mm.yyyy hh24:mi:ss'),450,3);
+INSERT INTO PURCHASES VALUES (4,to_date('14.10.2020 17:50:00', 'dd.mm.yyyy hh24:mi:ss'),1500,5);
+INSERT INTO PURCHASES VALUES (5,to_date('15.01.2021 17:50:00', 'dd.mm.yyyy hh24:mi:ss'),6000,7);
+INSERT INTO PURCHASES VALUES (6,to_date('16.01.2021 17:50:00', 'dd.mm.yyyy hh24:mi:ss'),700,8);
+INSERT INTO PURCHASES VALUES (7,to_date('17.01.2021 17:50:00', 'dd.mm.yyyy hh24:mi:ss'),800,9);
+INSERT INTO PURCHASES VALUES (8,to_date('18.01.2020 17:50:00', 'dd.mm.yyyy hh24:mi:ss'),900,10);
+INSERT INTO PURCHASES VALUES (9,to_date('19.11.2020 17:50:00', 'dd.mm.yyyy hh24:mi:ss'),10000,11);
+INSERT INTO PURCHASES VALUES (10,to_date('10.12.2020 17:50:00', 'dd.mm.yyyy hh24:mi:ss'),1000,12);
+INSERT INTO PURCHASES VALUES (11,to_date('11.10.2020 17:50:00', 'dd.mm.yyyy hh24:mi:ss'),1754,13);
+INSERT INTO PURCHASES VALUES (12,to_date('12.10.2020 17:50:00', 'dd.mm.yyyy hh24:mi:ss'),2145,16);
+INSERT INTO PURCHASES VALUES (13,to_date('13.02.2021 17:50:00', 'dd.mm.yyyy hh24:mi:ss'),236,17);
+INSERT INTO PURCHASES VALUES (14,to_date('14.02.2021 17:50:00', 'dd.mm.yyyy hh24:mi:ss'),982,20);
+INSERT INTO PURCHASES VALUES (15,to_date('15.10.2020 17:50:00', 'dd.mm.yyyy hh24:mi:ss'),4094,1);
+INSERT INTO PURCHASES VALUES (16,to_date('16.09.2020 17:50:00', 'dd.mm.yyyy hh24:mi:ss'),5094,2);
+INSERT INTO PURCHASES VALUES (17,to_date('17.01.2021 17:50:00', 'dd.mm.yyyy hh24:mi:ss'),604,3);
+INSERT INTO PURCHASES VALUES (18,to_date('18.02.2021 17:50:00', 'dd.mm.yyyy hh24:mi:ss'),407,5);
+INSERT INTO PURCHASES VALUES (19,to_date('19.02.2021 17:50:00', 'dd.mm.yyyy hh24:mi:ss'),3000,7);
+INSERT INTO PURCHASES VALUES (20,to_date('20.08.2020 17:50:00', 'dd.mm.yyyy hh24:mi:ss'),4023,8);
+INSERT INTO PURCHASES VALUES (21,to_date('11.06.2020 17:50:00', 'dd.mm.yyyy hh24:mi:ss'),1223,9);
+INSERT INTO PURCHASES VALUES (22,to_date('11.10.2020 17:50:00', 'dd.mm.yyyy hh24:mi:ss'),1567,10);
+INSERT INTO PURCHASES VALUES (23,to_date('10.01.2021 17:50:00', 'dd.mm.yyyy hh24:mi:ss'),99,11);
+INSERT INTO PURCHASES VALUES (24,to_date('15.01.2021 17:50:00', 'dd.mm.yyyy hh24:mi:ss'),907,12);
+INSERT INTO PURCHASES VALUES (25,to_date('17.01.2021 17:50:00', 'dd.mm.yyyy hh24:mi:ss'),4085,13);
+INSERT INTO PURCHASES VALUES (26,to_date('17.01.2021 17:50:00', 'dd.mm.yyyy hh24:mi:ss'),4094,16);
+INSERT INTO PURCHASES VALUES (27,to_date('17.01.2021 17:50:00', 'dd.mm.yyyy hh24:mi:ss'),6547,17);
+INSERT INTO PURCHASES VALUES (28,to_date('19.01.2021 17:50:00', 'dd.mm.yyyy hh24:mi:ss'),12300,20);
+INSERT INTO PURCHASES VALUES (29,to_date('05.01.2021 17:50:00', 'dd.mm.yyyy hh24:mi:ss'),432,1);
+
+
+
+
+INSERT INTO PRODUCTS VALUES (1,'8171','nnn');
+INSERT INTO PRODUCTS VALUES (2,'8271','aaa');
+INSERT INTO PRODUCTS VALUES (3,'8371','bbb');
+INSERT INTO PRODUCTS VALUES (4,'8471','ccc');
+INSERT INTO PRODUCTS VALUES (5,'8571','hhh');
+INSERT INTO PRODUCTS VALUES (6,'8671','ddd');
+INSERT INTO PRODUCTS VALUES (7,'8771','aaa');
+INSERT INTO PRODUCTS VALUES (8,'8871','rrr');
+INSERT INTO PRODUCTS VALUES (9,'8971','ggg');
+INSERT INTO PRODUCTS VALUES (10,'1471','sss');
+INSERT INTO PRODUCTS VALUES (11,'2471','jjj');
+INSERT INTO PRODUCTS VALUES (12,'3471','lll');
+INSERT INTO PRODUCTS VALUES (13,'4471','yyy');
+INSERT INTO PRODUCTS VALUES (14,'5471','rrr');
+INSERT INTO PRODUCTS VALUES (15,'6471','ppp');
+INSERT INTO PRODUCTS VALUES (16,'471','eee');
+INSERT INTO PRODUCTS VALUES (17,'9471','qqq');
+INSERT INTO PRODUCTS VALUES (18,'6571','ddd');
+
+
+INSERT INTO PURCHASES_RECEIPTS VALUES (1,1,1,2,454,154);
+INSERT INTO PURCHASES_RECEIPTS VALUES (2,1,2,1,1010,10);
+INSERT INTO PURCHASES_RECEIPTS VALUES (2,2,3,1,2000,500);
+INSERT INTO PURCHASES_RECEIPTS VALUES (2,3,4,1,600,100);
+INSERT INTO PURCHASES_RECEIPTS VALUES (3,1,5,2,456,6);
+INSERT INTO PURCHASES_RECEIPTS VALUES (4,1,5,2,700,50);
+INSERT INTO PURCHASES_RECEIPTS VALUES (4,2,6,1,899,99);
+INSERT INTO PURCHASES_RECEIPTS VALUES (4,3,7,1,100,50);
+INSERT INTO PURCHASES_RECEIPTS VALUES (6,1,7,1,400,0);
+INSERT INTO PURCHASES_RECEIPTS VALUES (6,2,5,1,350,50);
+INSERT INTO PURCHASES_RECEIPTS VALUES (7,1,7,1,300,100);
+INSERT INTO PURCHASES_RECEIPTS VALUES (7,2,7,1,1000,100);
+INSERT INTO PURCHASES_RECEIPTS VALUES (8,1,5,1,350,50);
+INSERT INTO PURCHASES_RECEIPTS VALUES (8,2,5,1,350,50);
+
+
